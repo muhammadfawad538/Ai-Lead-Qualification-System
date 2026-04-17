@@ -3,5 +3,8 @@
     "allow": [
       "mcp__n8n-mcp__search_nodes"
     ]
-  }
+  },
+  "disabledMcpjsonServers": [
+    "n8n-mcp"
+  ]
 }

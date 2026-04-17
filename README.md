@@ -1,4 +1,4 @@
-# AI Lead Qualification System
+# Lead Enrichment Frontend
 
 A professional Next.js frontend for the n8n Lead Enrichment & Qualification Pipeline.
 
@@ -32,8 +32,8 @@ A professional Next.js frontend for the n8n Lead Enrichment & Qualification Pipe
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/muhammadfawad538/Ai-Lead-Qualification-System.git
-cd Ai-Lead-Qualification-System/frontend
+git clone https://github.com/[username]/lead-enrichment-frontend.git
+cd lead-enrichment-frontend/frontend
 ```
 
 2. Install dependencies:
