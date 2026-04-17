@@ -37,7 +37,7 @@ export default function LeadForm() {
 
     try {
       // Submit to n8n webhook
-      const webhookUrl = process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL || 'https://pakfawad.app.n8n.cloud/webhook/lead-enrichment-form'
+      const webhookUrl = process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL || 'https://pakfawad.app.n8n.cloud/webhook/ee6a5882-b7a0-4f8a-9f38-b86aec1ec9e3'
 
       const response = await axios.post(webhookUrl, {
         'Full Name': formData.fullName,
