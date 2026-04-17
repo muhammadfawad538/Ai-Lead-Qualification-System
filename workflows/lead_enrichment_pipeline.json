@@ -1,0 +1,349 @@
+{
+  "name": "Lead Enrichment & Qualification Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Lead Capture Form",
+        "formDescription": "Tell us about your company",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Full Name",
+              "fieldType": "text",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Email",
+              "fieldType": "email",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Company Name",
+              "fieldType": "text",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Phone",
+              "fieldType": "text",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Message",
+              "fieldType": "textarea",
+              "requiredField": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "form-trigger-001",
+      "name": "Lead Form Submission",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [240, 300],
+      "webhookId": "lead-enrichment-form"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract and validate email\nconst input = $input.first().json;\n\nconst name = input['Full Name'] || '';\nconst email = input['Email'] || '';\nconst company = input['Company Name'] || '';\nconst phone = input['Phone'] || '';\nconst message = input['Message'] || '';\n\n// Basic email validation\nconst emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\nconst isValidEmail = emailRegex.test(email);\n\nif (!isValidEmail) {\n  throw new Error('Invalid email format');\n}\n\n// Extract domain from email\nconst domain = email.split('@')[1];\n\n// Filter out free email providers\nconst freeProviders = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com'];\nconst isBusinessEmail = !freeProviders.includes(domain.toLowerCase());\n\nreturn [{\n  json: {\n    name: name,\n    email: email,\n    company: company,\n    phone: phone,\n    message: message,\n    domain: domain,\n    is_business_email: isBusinessEmail,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "validate-email-002",
+      "name": "Validate Email & Extract Domain",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/customsearch/v1?key={{$env.GOOGLE_SEARCH_API_KEY}}&cx={{$env.GOOGLE_SEARCH_ENGINE_ID}}&q={{$json.company}}+official+website",
+        "options": {}
+      },
+      "id": "find-website-003",
+      "name": "Find Company Website",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract website URL from Google search results\nconst response = $input.first().json;\nconst formData = $('Validate Email & Extract Domain').first().json;\n\nlet website = '';\n\nif (response.items && response.items.length > 0) {\n  website = response.items[0].link;\n}\n\n// Fallback: construct from domain\nif (!website) {\n  website = 'https://' + formData.domain;\n}\n\nreturn [{\n  json: {\n    ...formData,\n    website: website\n  }\n}];"
+      },
+      "id": "extract-website-004",
+      "name": "Extract Website URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.website }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "scrape-website-005",
+      "name": "Scrape Company Website",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract text content from HTML\nconst html = $input.first().binary?.data ? Buffer.from($input.first().binary.data, 'base64').toString() : '';\nconst formData = $('Extract Website URL').first().json;\n\n// Simple HTML text extraction (remove tags)\nlet text = html.replace(/<script[^>]*>.*?<\\/script>/gi, '')\n               .replace(/<style[^>]*>.*?<\\/style>/gi, '')\n               .replace(/<[^>]+>/g, ' ')\n               .replace(/\\s+/g, ' ')\n               .trim();\n\n// Limit to first 3000 characters for AI analysis\ntext = text.substring(0, 3000);\n\n// Detect tech stack from HTML\nconst usesMailchimp = html.includes('mailchimp') || html.includes('mc.us');\nconst usesActiveCampaign = html.includes('activecampaign') || html.includes('vgo.js');\nconst usesSalesforce = html.includes('salesforce.com');\nconst usesHubSpot = html.includes('hubspot') || html.includes('hs-scripts.com');\n\nconst detectedTech = [];\nif (usesMailchimp) detectedTech.push('Mailchimp');\nif (usesActiveCampaign) detectedTech.push('ActiveCampaign');\nif (usesSalesforce) detectedTech.push('Salesforce');\nif (usesHubSpot) detectedTech.push('HubSpot');\n\nreturn [{\n  json: {\n    ...formData,\n    website_content: text,\n    detected_tech: detectedTech,\n    tech_stack_match: detectedTech.length > 0\n  }\n}];"
+      },
+      "id": "parse-html-006",
+      "name": "Parse HTML & Detect Tech Stack",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"Analyze this company website content and extract information in JSON format.\\n\\nCompany: \" + $json.company + \"\\nWebsite: \" + $json.website + \"\\nContent: \" + $json.website_content + \"\\n\\nExtract:\\n1. estimated_employees: Estimate company size (number). Look for team pages, about us, etc.\\n2. industry: Primary industry (SaaS, Tech, E-commerce, Other)\\n3. estimated_revenue: Estimate annual revenue in USD (number)\\n4. pain_points: Array of key challenges/problems mentioned\\n5. buying_signals: Array of growth indicators (hiring, funding, expansion, etc.)\\n6. is_saas: Boolean - is this a SaaS company?\\n7. is_tech: Boolean - is this a tech company?\\n\\nReturn ONLY valid JSON, no markdown or explanation.\"\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.3,\n    \"topP\": 0.8,\n    \"topK\": 40\n  }\n} }}",
+        "options": {}
+      },
+      "id": "ai-analysis-007",
+      "name": "AI Website Analysis (Gemini)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 300],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "gemini-api-key",
+          "name": "Gemini API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/customsearch/v1?key={{$env.GOOGLE_SEARCH_API_KEY}}&cx={{$env.GOOGLE_SEARCH_ENGINE_ID}}&q={{$('Extract Website URL').first().json.company}}+funding+raised+investment+news",
+        "options": {}
+      },
+      "id": "search-funding-008",
+      "name": "Search Funding News",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 480]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI analysis and funding search\nconst aiResponse = $('AI Website Analysis (Gemini)').first().json;\nconst fundingResponse = $input.first().json;\nconst formData = $('Parse HTML & Detect Tech Stack').first().json;\n\n// Extract AI analysis from Gemini response\nlet aiData = {};\ntry {\n  const aiText = aiResponse.candidates?.[0]?.content?.parts?.[0]?.text || '{}';\n  // Remove markdown code blocks if present\n  const cleanText = aiText.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  aiData = JSON.parse(cleanText);\n} catch (e) {\n  console.log('Failed to parse AI response:', e);\n  aiData = {\n    estimated_employees: 0,\n    industry: 'Unknown',\n    estimated_revenue: 0,\n    pain_points: [],\n    buying_signals: [],\n    is_saas: false,\n    is_tech: false\n  };\n}\n\n// Check for funding signals\nconst hasFundingNews = fundingResponse.items && fundingResponse.items.length > 0;\nconst fundingSnippets = hasFundingNews ? fundingResponse.items.slice(0, 3).map(item => item.snippet).join(' ') : '';\nconst recentFunding = fundingSnippets.toLowerCase().includes('raised') || fundingSnippets.toLowerCase().includes('funding');\n\nif (recentFunding && !aiData.buying_signals.includes('Recent funding')) {\n  aiData.buying_signals.push('Recent funding');\n}\n\nreturn [{\n  json: {\n    ...formData,\n    ...aiData,\n    recent_funding: recentFunding,\n    funding_snippets: fundingSnippets\n  }\n}];"
+      },
+      "id": "merge-data-009",
+      "name": "Merge Analysis Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Calculate lead score based on ICP fit\nconst data = $input.first().json;\n\nlet score = 0;\nlet scoreBreakdown = [];\n\n// Tech stack match (30 points)\nif (data.tech_stack_match && data.detected_tech.length > 0) {\n  score += 30;\n  scoreBreakdown.push(`Tech stack match (+30): ${data.detected_tech.join(', ')}`);\n}\n\n// Company size: 50-500 employees (25 points)\nconst employees = data.estimated_employees || 0;\nif (employees >= 50 && employees <= 500) {\n  score += 25;\n  scoreBreakdown.push(`Company size fit (+25): ${employees} employees`);\n} else if (employees > 0) {\n  scoreBreakdown.push(`Company size mismatch (0): ${employees} employees`);\n}\n\n// Industry: SaaS/Tech (20 points)\nif (data.is_saas || data.is_tech) {\n  score += 20;\n  scoreBreakdown.push(`Industry fit (+20): ${data.industry}`);\n} else {\n  scoreBreakdown.push(`Industry mismatch (0): ${data.industry}`);\n}\n\n// Revenue: $5M-$50M (15 points)\nconst revenue = data.estimated_revenue || 0;\nif (revenue >= 5000000 && revenue <= 50000000) {\n  score += 15;\n  scoreBreakdown.push(`Revenue fit (+15): $${(revenue/1000000).toFixed(1)}M`);\n} else if (revenue > 0) {\n  scoreBreakdown.push(`Revenue mismatch (0): $${(revenue/1000000).toFixed(1)}M`);\n}\n\n// Buying signals (10 points)\nif (data.buying_signals.length > 0 || data.recent_funding) {\n  score += 10;\n  scoreBreakdown.push(`Buying signals (+10): ${data.buying_signals.join(', ')}`);\n}\n\n// Determine status\nlet status = '';\nlet action = '';\n\nif (score >= 70) {\n  status = 'Hot Lead';\n  action = 'generate_email';\n} else if (score >= 40) {\n  status = 'Warm Lead';\n  action = 'nurture';\n} else {\n  status = 'Cold Lead';\n  action = 'archive';\n}\n\n// Generate archive reason for cold leads\nlet archiveReason = '';\nif (score < 40) {\n  const reasons = [];\n  if (!data.tech_stack_match) reasons.push('No target tech stack detected');\n  if (employees > 0 && (employees < 50 || employees > 500)) reasons.push(`Company size (${employees}) outside range`);\n  if (!data.is_saas && !data.is_tech) reasons.push(`Industry (${data.industry}) not SaaS/Tech`);\n  if (revenue > 0 && (revenue < 5000000 || revenue > 50000000)) reasons.push(`Revenue outside target range`);\n  archiveReason = reasons.join('; ');\n}\n\nreturn [{\n  json: {\n    ...data,\n    lead_score: score,\n    score_breakdown: scoreBreakdown,\n    status: status,\n    action: action,\n    archive_reason: archiveReason\n  }\n}];"
+      },
+      "id": "calculate-score-010",
+      "name": "Calculate Lead Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "hot-lead",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "generate_email",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "warm-lead",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "nurture",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "branch-by-score-011",
+      "name": "Branch by Score",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [2220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"Write a personalized B2B sales outreach email.\\n\\nProspect Details:\\n- Name: \" + $json.name + \"\\n- Company: \" + $json.company + \"\\n- Industry: \" + $json.industry + \"\\n- Tech Stack: \" + $json.detected_tech.join(', ') + \"\\n- Pain Points: \" + $json.pain_points.join(', ') + \"\\n- Buying Signals: \" + $json.buying_signals.join(', ') + \"\\n\\nOur Value Proposition: \" + $env.VALUE_PROPOSITION + \"\\n\\nRequirements:\\n- Address them by name\\n- Reference their tech stack specifically\\n- Mention their pain points\\n- Keep it under 150 words\\n- Professional but conversational tone\\n- Include a clear call-to-action\\n- Sign off with: Best regards, [Your Name] from \" + $env.COMPANY_NAME + \"\\n\\nReturn ONLY the email body, no subject line.\"\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.7,\n    \"topP\": 0.9,\n    \"topK\": 40\n  }\n} }}",
+        "options": {}
+      },
+      "id": "generate-email-012",
+      "name": "Generate Personalized Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2440, 200],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "gemini-api-key",
+          "name": "Gemini API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract generated email\nconst emailResponse = $input.first().json;\nconst leadData = $('Calculate Lead Score').first().json;\n\nlet generatedEmail = '';\ntry {\n  generatedEmail = emailResponse.candidates?.[0]?.content?.parts?.[0]?.text || 'Failed to generate email';\n} catch (e) {\n  generatedEmail = 'Error generating email';\n}\n\nreturn [{\n  json: {\n    ...leadData,\n    generated_email: generatedEmail.trim()\n  }\n}];"
+      },
+      "id": "extract-email-013",
+      "name": "Extract Generated Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2660, 200]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.GOOGLE_SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $json.timestamp }}",
+            "Name": "={{ $json.name }}",
+            "Email": "={{ $json.email }}",
+            "Company": "={{ $json.company }}",
+            "Domain": "={{ $json.domain }}",
+            "Website": "={{ $json.website }}",
+            "Industry": "={{ $json.industry }}",
+            "Company Size": "={{ $json.estimated_employees }}",
+            "Tech Stack": "={{ $json.detected_tech.join(', ') }}",
+            "Lead Score": "={{ $json.lead_score }}",
+            "Status": "={{ $json.status }}",
+            "Generated Email": "={{ $json.generated_email || '' }}",
+            "Archive Reason": "={{ $json.archive_reason || '' }}",
+            "Raw Data": "={{ JSON.stringify($json) }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "save-to-sheets-014",
+      "name": "Save to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2880, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-oauth",
+          "name": "Google Sheets OAuth"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Lead Form Submission": {
+      "main": [[{ "node": "Validate Email & Extract Domain", "type": "main", "index": 0 }]]
+    },
+    "Validate Email & Extract Domain": {
+      "main": [[{ "node": "Find Company Website", "type": "main", "index": 0 }]]
+    },
+    "Find Company Website": {
+      "main": [[{ "node": "Extract Website URL", "type": "main", "index": 0 }]]
+    },
+    "Extract Website URL": {
+      "main": [[{ "node": "Scrape Company Website", "type": "main", "index": 0 }]]
+    },
+    "Scrape Company Website": {
+      "main": [[{ "node": "Parse HTML & Detect Tech Stack", "type": "main", "index": 0 }]]
+    },
+    "Parse HTML & Detect Tech Stack": {
+      "main": [[
+        { "node": "AI Website Analysis (Gemini)", "type": "main", "index": 0 },
+        { "node": "Search Funding News", "type": "main", "index": 0 }
+      ]]
+    },
+    "AI Website Analysis (Gemini)": {
+      "main": [[]]
+    },
+    "Search Funding News": {
+      "main": [[{ "node": "Merge Analysis Data", "type": "main", "index": 0 }]]
+    },
+    "Merge Analysis Data": {
+      "main": [[{ "node": "Calculate Lead Score", "type": "main", "index": 0 }]]
+    },
+    "Calculate Lead Score": {
+      "main": [[{ "node": "Branch by Score", "type": "main", "index": 0 }]]
+    },
+    "Branch by Score": {
+      "main": [
+        [{ "node": "Generate Personalized Email", "type": "main", "index": 0 }],
+        [{ "node": "Save to Google Sheets", "type": "main", "index": 0 }],
+        [{ "node": "Save to Google Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Personalized Email": {
+      "main": [[{ "node": "Extract Generated Email", "type": "main", "index": 0 }]]
+    },
+    "Extract Generated Email": {
+      "main": [[{ "node": "Save to Google Sheets", "type": "main", "index": 0 }]]
+    },
+    "Save to Google Sheets": {
+      "main": [[]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "lead-enrichment-v1",
+  "meta": {
+    "instanceId": "lead-enrichment-pipeline"
+  },
+  "id": "LeadEnrichmentPipeline",
+  "tags": [
+    {
+      "createdAt": "2026-04-16T14:35:00.000Z",
+      "updatedAt": "2026-04-16T14:35:00.000Z",
+      "id": "1",
+      "name": "sales-automation"
+    },
+    {
+      "createdAt": "2026-04-16T14:35:00.000Z",
+      "updatedAt": "2026-04-16T14:35:00.000Z",
+      "id": "2",
+      "name": "lead-enrichment"
+    }
+  ]
+}

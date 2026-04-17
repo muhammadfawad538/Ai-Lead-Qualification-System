@@ -1,0 +1,359 @@
+{
+  "name": "AI UGC Video Ad Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "ugc-video-generator",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "7f5634d1-32c1-4dfa-b6a1-2e250c3158e0",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "70bef7e5-c5b2-4191-a5f2-e4b722c83002"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract webhook data\nconst input = $input.first().json.body || $input.first().json;\n\n// Validate required fields\nconst required = ['product_name', 'product_photo', 'avatar_description', 'product_features', 'video_setting'];\nconst missing = required.filter(field => !input[field]);\n\nif (missing.length > 0) {\n  throw new Error(`Missing required fields: ${missing.join(', ')}`);\n}\n\n// Return validated data\nreturn [{\n  json: {\n    product_name: input.product_name,\n    product_photo: input.product_photo,\n    avatar_description: input.avatar_description,\n    product_features: input.product_features,\n    video_setting: input.video_setting,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "65ffff00-2c73-4dd3-b0cf-3f0686b7921e",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a UGC video script writer. Create authentic, conversational 15-second scripts for user-generated content style ads. Keep it natural and relatable."
+            },
+            {
+              "role": "user",
+              "content": "=Create a 15-second UGC-style video script for:\n\nProduct: {{ $json.product_name }}\nFeatures: {{ $json.product_features }}\nSetting: {{ $json.video_setting }}\nAvatar: {{ $json.avatar_description }}\n\nMake it authentic and conversational. The script should feel like a real person sharing their experience."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.8,
+          "maxTokens": 200
+        }
+      },
+      "id": "85cd385a-d314-427b-9d9c-94de00d5e0cf",
+      "name": "Generate Script (OpenAI)",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "1",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract the generated script from OpenAI response\nconst openaiResponse = $input.first().json;\nconst script = openaiResponse.choices?.[0]?.message?.content || openaiResponse.message?.content || '';\n\nif (!script) {\n  throw new Error('Failed to generate script from OpenAI');\n}\n\n// Pass through all data plus the script\nreturn [{\n  json: {\n    ...openaiResponse,\n    generated_script: script.trim(),\n    product_name: $('Validate Input').first().json.product_name,\n    product_photo: $('Validate Input').first().json.product_photo,\n    avatar_description: $('Validate Input').first().json.avatar_description,\n    video_setting: $('Validate Input').first().json.video_setting\n  }\n}];"
+      },
+      "id": "605db61b-d1f1-42c8-a253-1f0ebb285ae8",
+      "name": "Extract Script",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.heygen.com/v2/video/generate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "heyGenApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "video_inputs",
+              "value": "={{ [{\"character\": {\"type\": \"avatar\", \"avatar_id\": \"default\"}, \"voice\": {\"type\": \"text\", \"input_text\": $json.generated_script}, \"background\": {\"type\": \"color\", \"value\": \"#ffffff\"}}] }}"
+            },
+            {
+              "name": "dimension",
+              "value": "={{ {\"width\": 1080, \"height\": 1920} }}"
+            },
+            {
+              "name": "test",
+              "value": "={{ false }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7a4a7a5c-fd62-4db9-9daa-06cfff0e12a5",
+      "name": "Generate Video (HeyGen)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        300
+      ],
+      "credentials": {
+        "heyGenApi": {
+          "id": "2",
+          "name": "HeyGen API"
+        }
+      },
+      "notes": "Replace with your preferred AI video API (HeyGen, D-ID, Tavus, etc.)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract job/video ID from API response\nconst response = $input.first().json;\n\n// Handle different API response formats\nconst videoId = response.data?.video_id || response.video_id || response.id || response.data?.id;\nconst status = response.data?.status || response.status || 'pending';\n\nif (!videoId) {\n  throw new Error('No video ID returned from API');\n}\n\nreturn [{\n  json: {\n    video_id: videoId,\n    status: status,\n    api_response: response,\n    product_name: $('Extract Script').first().json.product_name,\n    generated_script: $('Extract Script').first().json.generated_script\n  }\n}];"
+      },
+      "id": "75135347-c3cc-4e67-8749-912ce24d7066",
+      "name": "Extract Video Job ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "f541da11-552e-4840-a2e6-25315962803a",
+      "name": "Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1560,
+        300
+      ],
+      "webhookId": "a852d0a6-7c45-47db-a9aa-65e08f60ba0f"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.heygen.com/v1/video_status.get?video_id={{ $json.video_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "heyGenApi",
+        "options": {}
+      },
+      "id": "04b6db88-1351-41ae-9f54-82473e77e0ab",
+      "name": "Check Video Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        300
+      ],
+      "credentials": {
+        "heyGenApi": {
+          "id": "2",
+          "name": "HeyGen API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.data.status || $json.status }}",
+              "operation": "equals",
+              "value2": "completed"
+            }
+          ]
+        }
+      },
+      "id": "7706ebc1-5a00-4bf0-a431-f92de70d6e43",
+      "name": "Is Complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract final video URL\nconst response = $input.first().json;\nconst videoUrl = response.data?.video_url || response.video_url || response.data?.url;\n\nreturn [{\n  json: {\n    success: true,\n    video_url: videoUrl,\n    video_id: $('Extract Video Job ID').first().json.video_id,\n    product_name: $('Extract Video Job ID').first().json.product_name,\n    script: $('Extract Video Job ID').first().json.generated_script,\n    status: 'completed',\n    completed_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "aaf813f1-223f-4a92-88b3-baf84a7f3ffc",
+      "name": "Return Video URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if we've waited too long (max 5 minutes)\nconst startTime = $('Extract Video Job ID').first().json.api_response?.created_at || Date.now();\nconst elapsed = Date.now() - new Date(startTime).getTime();\nconst maxWait = 5 * 60 * 1000; // 5 minutes\n\nif (elapsed > maxWait) {\n  throw new Error('Video generation timeout - exceeded 5 minutes');\n}\n\n// Pass data back to wait node\nreturn [{\n  json: {\n    video_id: $('Extract Video Job ID').first().json.video_id,\n    status: 'processing',\n    product_name: $('Extract Video Job ID').first().json.product_name,\n    generated_script: $('Extract Video Job ID').first().json.generated_script\n  }\n}];"
+      },
+      "id": "18048dc4-2e1b-493c-b506-694eb29a5e5b",
+      "name": "Still Processing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Generate Script (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Script (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Extract Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Script": {
+      "main": [
+        [
+          {
+            "node": "Generate Video (HeyGen)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Video (HeyGen)": {
+      "main": [
+        [
+          {
+            "node": "Extract Video Job ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Video Job ID": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Check Video Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Video Status": {
+      "main": [
+        [
+          {
+            "node": "Is Complete?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Complete?": {
+      "main": [
+        [
+          {
+            "node": "Return Video URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Still Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still Processing": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "description": "Receives product info via webhook, generates UGC script with OpenAI, creates video with AI video API"
+  }
+}

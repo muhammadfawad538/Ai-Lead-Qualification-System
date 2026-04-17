@@ -1,0 +1,397 @@
+{
+  "name": "Google Form to AI Video Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "640f75a1-3d42-4cd4-a7a1-5012c9cf9a4d",
+      "name": "Google Sheets Trigger",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Triggers when a new row is added to the Google Form responses sheet"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract data from Google Form response\nconst input = $input.first().json;\n\n// Map Google Form columns to our fields\n// Adjust these column names to match your actual Google Form\nconst data = {\n  product_name: input['Product Name'] || input.product_name || '',\n  product_photo: input['Product Photo URL'] || input.product_photo || '',\n  avatar_description: input['Avatar Description'] || input.avatar_description || '',\n  product_features: input['Product Features'] || input.product_features || '',\n  video_setting: input['Video Setting'] || input.video_setting || '',\n  timestamp: input.Timestamp || new Date().toISOString(),\n  row_number: input.__rowNumber || 0\n};\n\n// Validate required fields\nconst required = ['product_name', 'avatar_description', 'product_features', 'video_setting'];\nconst missing = required.filter(field => !data[field]);\n\nif (missing.length > 0) {\n  throw new Error(`Missing required fields: ${missing.join(', ')}`);\n}\n\nreturn [{ json: data }];"
+      },
+      "id": "5fc7fda1-462b-43aa-ae37-26264979ef50",
+      "name": "Extract Form Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a UGC video script writer. Create authentic, conversational 15-second scripts for user-generated content style ads. Keep it natural and relatable."
+            },
+            {
+              "role": "user",
+              "content": "=Create a 15-second UGC-style video script for:\n\nProduct: {{ $json.product_name }}\nFeatures: {{ $json.product_features }}\nSetting: {{ $json.video_setting }}\nAvatar: {{ $json.avatar_description }}\n\nMake it authentic and conversational. The script should feel like a real person sharing their experience."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.8,
+          "maxTokens": 200
+        }
+      },
+      "id": "c275a0a3-2471-428c-a88e-da3d5f6abcd9",
+      "name": "Generate Script (OpenAI)",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "2",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract the generated script\nconst openaiResponse = $input.first().json;\nconst script = openaiResponse.choices?.[0]?.message?.content || openaiResponse.message?.content || '';\n\nif (!script) {\n  throw new Error('Failed to generate script from OpenAI');\n}\n\nconst formData = $('Extract Form Data').first().json;\n\nreturn [{\n  json: {\n    generated_script: script.trim(),\n    product_name: formData.product_name,\n    product_photo: formData.product_photo,\n    avatar_description: formData.avatar_description,\n    video_setting: formData.video_setting,\n    row_number: formData.row_number\n  }\n}];"
+      },
+      "id": "15107b85-85c1-439e-b269-9986890ada77",
+      "name": "Extract Script",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.d-id.com/talks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"script\": {\n    \"type\": \"text\",\n    \"input\": $json.generated_script,\n    \"provider\": {\n      \"type\": \"microsoft\",\n      \"voice_id\": \"en-US-JennyNeural\"\n    }\n  },\n  \"config\": {\n    \"fluent\": true,\n    \"pad_audio\": 0\n  },\n  \"source_url\": $json.product_photo || \"https://create-images-results.d-id.com/default_presenter.jpg\"\n} }}",
+        "options": {}
+      },
+      "id": "aceeba49-92bb-40c5-9872-ff6771dce994",
+      "name": "Create Video (D-ID)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "3",
+          "name": "D-ID API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract talk ID from D-ID response\nconst response = $input.first().json;\nconst talkId = response.id;\n\nif (!talkId) {\n  throw new Error('No talk ID returned from D-ID API');\n}\n\nreturn [{\n  json: {\n    talk_id: talkId,\n    status: response.status || 'created',\n    product_name: $('Extract Script').first().json.product_name,\n    generated_script: $('Extract Script').first().json.generated_script,\n    row_number: $('Extract Script').first().json.row_number\n  }\n}];"
+      },
+      "id": "73d43ec0-576a-4bad-bc64-09b98915ed6d",
+      "name": "Extract Talk ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 20,
+        "unit": "seconds"
+      },
+      "id": "dc806131-b99c-489d-b357-c6c5cb2b1bc2",
+      "name": "Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1560,
+        300
+      ],
+      "webhookId": "1aa56b72-9001-4a21-9e14-32209f95d5e9"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.d-id.com/talks/{{ $json.talk_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "59a258e1-2c71-413e-a264-b3a196435c3f",
+      "name": "Check Video Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "3",
+          "name": "D-ID API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equals",
+              "value2": "done"
+            }
+          ]
+        }
+      },
+      "id": "5c163c62-94d3-4e71-89a9-fa9636796f9c",
+      "name": "Is Complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Video URL": "={{ $json.result_url }}",
+            "Status": "=Completed",
+            "Completed At": "={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [
+            "Row Number"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "8705cda3-5d3d-4b2e-951d-32a0a435635e",
+      "name": "Update Sheet with Video",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        2220,
+        200
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check timeout (max 3 minutes for D-ID)\nconst startTime = $('Extract Talk ID').first().json.timestamp || Date.now();\nconst elapsed = Date.now() - new Date(startTime).getTime();\nconst maxWait = 3 * 60 * 1000; // 3 minutes\n\nif (elapsed > maxWait) {\n  throw new Error('Video generation timeout - exceeded 3 minutes');\n}\n\n// Pass data back\nreturn [{\n  json: {\n    talk_id: $('Extract Talk ID').first().json.talk_id,\n    status: 'processing',\n    product_name: $('Extract Talk ID').first().json.product_name,\n    generated_script: $('Extract Talk ID').first().json.generated_script,\n    row_number: $('Extract Talk ID').first().json.row_number\n  }\n}];"
+      },
+      "id": "55e7b722-1181-4d39-b447-c619780c29f8",
+      "name": "Still Processing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Google Sheets Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Form Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Form Data": {
+      "main": [
+        [
+          {
+            "node": "Generate Script (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Script (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Extract Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Script": {
+      "main": [
+        [
+          {
+            "node": "Create Video (D-ID)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Video (D-ID)": {
+      "main": [
+        [
+          {
+            "node": "Extract Talk ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Talk ID": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Check Video Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Video Status": {
+      "main": [
+        [
+          {
+            "node": "Is Complete?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Complete?": {
+      "main": [
+        [
+          {
+            "node": "Update Sheet with Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Still Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still Processing": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "description": "Receives Google Form submissions, generates UGC script with OpenAI, creates video with D-ID"
+  }
+}

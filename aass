@@ -1,0 +1,19 @@
+Create an n8n workflow for an AI UGC Video Ad Generator.
+
+​Context: I want to build an n8n workflow that mimics the functionality shown in this UI. The workflow should receive a webhook from a frontend and process a video generation request.
+
+​Input Data Fields:
+
+​product_name: (e.g., "Cologne")
+​product_photo: (URL or Binary)
+​avatar_description: (e.g., "Young adult male")
+​product_features: (e.g., "clean scent, not too strong")
+​video_setting: (e.g., "In a kitchen, getting ready to head out")
+​Workflow Requirements:
+
+​Trigger: Use a Webhook node to receive the JSON data above.
+​Script Generation: Use an OpenAI node (GPT-4o) to write a 15-second UGC-style script based on the product name, features, and setting.
+​Video Generation: * Integrate with an AI Video API (like HeyGen, Tavus, or D-ID).
+​The node should use the generated script and the avatar_description to select or create a talking head video.
+​Background/Setting: If the API supports it, apply the video_setting as a background or prompt instruction.
+​Status Handling: Use a Wait node or a polling loop if the video API is asynchronous (returns a Job ID first).

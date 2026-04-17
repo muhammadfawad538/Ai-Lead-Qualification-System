@@ -1,0 +1,470 @@
+{
+  "name": "Simple Form to AI Video (Gemini Free)",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": " // Get the input from Google Form\n  const input = $input.first().json;\n\n  // Log to see what we received\n  console.log('Received data:', JSON.stringify(input));\n\n  // Extract the data - Google Forms sends it in different ways\n  let data = {\n    product_name: '',\n    product_photo: '',\n    avatar_description: '',\n    product_features: '',\n    video_setting: '',\n    email: '',\n    timestamp: new Date().toISOString()\n  };\n\n  // Try to extract from common Google Form formats\n  if (input.responses) {\n    // Format: responses object\n    Object.keys(input.responses).forEach(key => {\n      const value = input.responses[key];\n      if (key.includes('Product Name')) data.product_name = value;\n      if (key.includes('Photo')) data.product_photo = value;\n      if (key.includes('Avatar')) data.avatar_description = value;\n      if (key.includes('Features')) data.product_features = value;\n      if (key.includes('Setting')) data.video_setting = value;\n      if (key.includes('Email')) data.email = value;\n    });\n  }\n\n  // Return the data\n  return [{ json: data }];\n"
+      },
+      "id": "28c61396-122f-4a3d-a64a-1768e12b7ad9",
+      "name": "Extract Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"You are a UGC video script writer. Create an authentic, conversational 15-second script for a user-generated content style ad.\\n\\nProduct: \" + $json.product_name + \"\\nFeatures: \" + $json.product_features + \"\\nSetting: \" + $json.video_setting + \"\\nAvatar: \" + $json.avatar_description + \"\\n\\nMake it natural and relatable. The script should feel like a real person sharing their experience. Return ONLY the script text, nothing else.\"\n    }]\n  }]\n} }}",
+        "options": {}
+      },
+      "id": "8106e1cd-f770-4ac1-94ec-687f946fbd5c",
+      "name": "Generate Script (Gemini FREE)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        448,
+        0
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "4YlkZa4kKGJmS0vK",
+          "name": "Google Gemini(PaLM) Api account"
+        },
+        "httpQueryAuth": {
+          "id": "24sM58v3ynN6ujGc",
+          "name": "Query Auth account"
+        }
+      },
+      "notes": "Uses Google Gemini - completely FREE!"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract script from Gemini response\nconst response = $input.first().json;\nconst script = response.candidates?.[0]?.content?.parts?.[0]?.text || '';\n\nif (!script) {\n  throw new Error('Failed to generate script from Gemini');\n}\n\nconst formData = $('Extract Data').first().json;\n\nreturn [{\n  json: {\n    generated_script: script.trim(),\n    product_name: formData.product_name,\n    product_photo: formData.product_photo,\n    email: formData.email\n  }\n}];"
+      },
+      "id": "315c261b-67eb-4aef-b7bc-eadc58717494",
+      "name": "Extract Script",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.d-id.com/talks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "script.type",
+              "value": "text"
+            },
+            {
+              "name": "script.input",
+              "value": "=={{ $json.generated_script }}"
+            },
+            {
+              "name": "script.provider.type",
+              "value": "microsoft"
+            },
+            {
+              "name": "script.provider.voice_id",
+              "value": "en-US-JennyNeural"
+            },
+            {
+              "name": " config.fluent",
+              "value": "true"
+            },
+            {
+              "name": "config.pad_audio",
+              "value": "0"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "67e3f671-cfc0-4285-94b9-dca26dac7da5",
+      "name": "Create Video (D-ID)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "oMSfOUf2JOnvWd5B",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst videoId = response.id;\n\nif (!videoId) {\n  throw new Error('No video ID returned');\n}\n\nreturn [{\n  json: {\n    video_id: videoId,\n    status: response.status || 'created',\n    script: $('Extract Script').first().json.generated_script,\n    product_name: $('Extract Script').first().json.product_name,\n    email: $('Extract Script').first().json.email\n  }\n}];"
+      },
+      "id": "15f8b279-1733-40f0-b23a-63bfdd847220",
+      "name": "Extract Video ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "d868ea62-b446-41f1-a4dd-2998745fda47",
+      "name": "Wait 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1328,
+        0
+      ],
+      "webhookId": "c3b96219-67be-4498-9e17-7ab3a0ce76f4"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.d-id.com/talks/{{ $json.video_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "7a9ea7cd-8d42-4ed7-8de9-8b70432095e7",
+      "name": "Get Video URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1552,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "oMSfOUf2JOnvWd5B",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst videoUrl = response.result_url || 'Processing...';\nconst status = response.status;\n\nreturn [{\n  json: {\n    status: status,\n    video_url: videoUrl,\n    product_name: $('Extract Video ID').first().json.product_name,\n    script: $('Extract Video ID').first().json.script,\n    message: status === 'done' ? 'Video ready!' : 'Still processing, check back in 1 minute'\n  }\n}];"
+      },
+      "id": "789cc41a-d63e-4dd6-9e14-67e0f831bc6c",
+      "name": "Show Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "jaani",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Product Name"
+            },
+            {
+              "fieldLabel": "Product Photo"
+            },
+            {
+              "fieldLabel": "Avatar Description"
+            },
+            {
+              "fieldLabel": "Product Features"
+            },
+            {
+              "fieldLabel": "Video Setting"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        0
+      ],
+      "id": "897014cc-6d0a-4feb-83dc-c4d4358f9df8",
+      "name": "On form submission",
+      "webhookId": "4858506a-63e7-4c01-b4ea-70176bae6527"
+    }
+  ],
+  "pinData": {
+    "On form submission": [
+      {
+        "json": {
+          "__isTrimmedManualExecutionDataItem": true
+        }
+      }
+    ],
+    "Extract Data": [
+      {
+        "json": {
+          "__isTrimmedManualExecutionDataItem": true
+        }
+      }
+    ],
+    "Generate Script (Gemini FREE)": [
+      {
+        "json": {
+          "__isTrimmedManualExecutionDataItem": true
+        }
+      }
+    ],
+    "Extract Script": [
+      {
+        "json": {
+          "__isTrimmedManualExecutionDataItem": true
+        }
+      }
+    ],
+    "Create Video (D-ID)": [
+      {
+        "json": {
+          "__isTrimmedManualExecutionDataItem": true
+        }
+      }
+    ],
+    "Extract Video ID": [
+      {
+        "json": {
+          "__isTrimmedManualExecutionDataItem": true
+        }
+      }
+    ],
+    "Get Video URL": [
+      {
+        "json": {
+          "user": {
+            "features": [
+              "stitch",
+              "clips:write",
+              "scene",
+              "premium-plus:skip-speaker-validation",
+              "expressives",
+              null
+            ],
+            "stripe_plan_group": "deid-trial",
+            "authorizer": "basic",
+            "owner_id": "google-oauth2|113039203258648771450",
+            "id": "google-oauth2|113039203258648771450",
+            "plan": "deid-trial",
+            "email": "mfawaduetian538@gmail.com",
+            "data_region": "us"
+          },
+          "audio_url": "https://d-id-talks-prod.s3.us-west-2.amazonaws.com/google-oauth2%7C113039203258648771450/tlk_B9UiI8YhbJAYLFf18jWLq/microsoft.wav?AWSAccessKeyId=AKIA5CUMPJBIK65W6FGA&Expires=1776311889&Signature=foV7tOslNYwgl0%2FBDrCenRBsfGM%3D",
+          "config": {
+            "stitch": false,
+            "align_driver": true,
+            "sharpen": true,
+            "normalization_factor": 1,
+            "result_format": ".mp4",
+            "fluent": false,
+            "pad_audio": 0,
+            "reduce_noise": false,
+            "auto_match": true,
+            "show_watermark": true,
+            "motion_factor": 1,
+            "optimize_audio": false,
+            "align_expand_factor": 0.3
+          },
+          "created_at": "2026-04-15T03:58:09.782Z",
+          "created_by": "google-oauth2|113039203258648771450",
+          "driver_url": "bank://natural/",
+          "duration": 20.2375,
+          "face": {
+            "mask_confidence": -1,
+            "detection": [
+              224,
+              198,
+              484,
+              552
+            ],
+            "overlap": "no",
+            "size": 512,
+            "top_left": [
+              98,
+              119
+            ],
+            "face_id": 0,
+            "detect_confidence": 0.9998352527618408
+          },
+          "id": "tlk_B9UiI8YhbJAYLFf18jWLq",
+          "metadata": {
+            "driver_url": "bank://natural/driver-4/original",
+            "mouth_open": false,
+            "num_faces": 1,
+            "num_frames": 506,
+            "processing_fps": 76.78038306734595,
+            "resolution": [
+              512,
+              512
+            ],
+            "size_kib": 4409.744140625
+          },
+          "modified_at": "2026-04-15T03:58:35.750Z",
+          "script": {
+            "length": 223,
+            "subtitles": false,
+            "type": "text",
+            "provider": {
+              "type": "microsoft",
+              "voice_id": "en-US-JennyNeural"
+            }
+          },
+          "source_url": "https://d-id-talks-prod.s3.us-west-2.amazonaws.com/google-oauth2%7C113039203258648771450/tlk_B9UiI8YhbJAYLFf18jWLq/source/alice.jpg?AWSAccessKeyId=AKIA5CUMPJBIK65W6FGA&Expires=1776311889&Signature=kyCxH5vG4wslBkjXdU0Xn%2FxpIdk%3D",
+          "started_at": "2026-04-15T03:58:27.638",
+          "status": "done",
+          "subtitles": false,
+          "user_id": "google-oauth2|113039203258648771450",
+          "result_url": "https://d-id-talks-prod.s3.us-west-2.amazonaws.com/google-oauth2%7C113039203258648771450/tlk_B9UiI8YhbJAYLFf18jWLq/1776225489782.mp4?AWSAccessKeyId=AKIA5CUMPJBIK65W6FGA&Expires=1776311915&Signature=TdseoqEFFruyZq32I%2B8voOdb8LE%3D"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ],
+    "Show Result": [
+      {
+        "json": {
+          "status": "done",
+          "video_url": "https://d-id-talks-prod.s3.us-west-2.amazonaws.com/google-oauth2%7C113039203258648771450/tlk_B9UiI8YhbJAYLFf18jWLq/1776225489782.mp4?AWSAccessKeyId=AKIA5CUMPJBIK65W6FGA&Expires=1776311915&Signature=TdseoqEFFruyZq32I%2B8voOdb8LE%3D",
+          "product_name": "",
+          "script": "Okay, you guys *have* to see this. My skin was so dull, but since using GlowUp Daily Hydration Serum, it's glowing! Seriously. It feels so soft and dewy, and totally non-greasy. Absorbs in seconds! I'm obsessed. Go get it!",
+          "message": "Video ready!"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Extract Data": {
+      "main": [
+        [
+          {
+            "node": "Generate Script (Gemini FREE)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Script (Gemini FREE)": {
+      "main": [
+        [
+          {
+            "node": "Extract Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Script": {
+      "main": [
+        [
+          {
+            "node": "Create Video (D-ID)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Video (D-ID)": {
+      "main": [
+        [
+          {
+            "node": "Extract Video ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Video ID": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s": {
+      "main": [
+        [
+          {
+            "node": "Get Video URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Video URL": {
+      "main": [
+        [
+          {
+            "node": "Show Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Extract Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "0a560443-3e5d-4e67-be44-88000b7e7b9c",
+  "meta": {
+    "instanceId": "4f51b5bc5985e3a8f9d60c7f97550c1100e9a998a58b7a6904e6bec324ef6dcc"
+  },
+  "id": "ResDlekwsqCSdNwr",
+  "tags": []
+}

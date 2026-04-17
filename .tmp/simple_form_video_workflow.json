@@ -1,0 +1,281 @@
+{
+  "name": "Simple Form to AI Video (Gemini Free)",
+  "nodes": [
+    {
+      "parameters": {
+        "formId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": ""
+        },
+        "triggerOn": "formSubmit"
+      },
+      "id": "02177bc5-6675-4632-a09a-02cea3c8f797",
+      "name": "Google Form Trigger",
+      "type": "n8n-nodes-base.googleFormsTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "a41a4275-18de-40ea-8232-eec6e9d6f87a",
+      "credentials": {
+        "googleFormsOAuth2Api": {
+          "id": "1",
+          "name": "Google Forms account"
+        }
+      },
+      "notes": "Triggers automatically when form is submitted - no Apps Script needed!"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract form responses\nconst responses = $input.first().json.responses || {};\n\nreturn [{\n  json: {\n    product_name: responses.product_name || responses['Product Name'] || '',\n    product_photo: responses.product_photo || responses['Product Photo URL'] || '',\n    avatar_description: responses.avatar_description || responses['Avatar Description'] || '',\n    product_features: responses.product_features || responses['Product Features'] || '',\n    video_setting: responses.video_setting || responses['Video Setting'] || '',\n    email: responses.email || responses['Email'] || '',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "691ed0dc-2c38-406f-a0d6-256733171016",
+      "name": "Extract Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "queryAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"You are a UGC video script writer. Create an authentic, conversational 15-second script for a user-generated content style ad.\\n\\nProduct: \" + $json.product_name + \"\\nFeatures: \" + $json.product_features + \"\\nSetting: \" + $json.video_setting + \"\\nAvatar: \" + $json.avatar_description + \"\\n\\nMake it natural and relatable. The script should feel like a real person sharing their experience. Return ONLY the script text, nothing else.\"\n    }]\n  }]\n} }}",
+        "options": {}
+      },
+      "id": "98265b89-2fa3-4a80-bc6e-d544febb55b5",
+      "name": "Generate Script (Gemini FREE)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "2",
+          "name": "Gemini API"
+        }
+      },
+      "notes": "Uses Google Gemini - completely FREE!"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract script from Gemini response\nconst response = $input.first().json;\nconst script = response.candidates?.[0]?.content?.parts?.[0]?.text || '';\n\nif (!script) {\n  throw new Error('Failed to generate script from Gemini');\n}\n\nconst formData = $('Extract Data').first().json;\n\nreturn [{\n  json: {\n    generated_script: script.trim(),\n    product_name: formData.product_name,\n    product_photo: formData.product_photo,\n    email: formData.email\n  }\n}];"
+      },
+      "id": "20859911-3377-43c7-b5c2-2ff2c54e310a",
+      "name": "Extract Script",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.d-id.com/talks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"script\": {\n    \"type\": \"text\",\n    \"input\": $json.generated_script,\n    \"provider\": {\n      \"type\": \"microsoft\",\n      \"voice_id\": \"en-US-JennyNeural\"\n    }\n  },\n  \"config\": {\n    \"fluent\": true,\n    \"pad_audio\": 0\n  },\n  \"source_url\": $json.product_photo || \"https://create-images-results.d-id.com/default_presenter.jpg\"\n} }}",
+        "options": {}
+      },
+      "id": "cd76bc09-c28e-4d8c-bb5d-468a1f280f4e",
+      "name": "Create Video (D-ID)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "3",
+          "name": "D-ID API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst videoId = response.id;\n\nif (!videoId) {\n  throw new Error('No video ID returned');\n}\n\nreturn [{\n  json: {\n    video_id: videoId,\n    status: response.status || 'created',\n    script: $('Extract Script').first().json.generated_script,\n    product_name: $('Extract Script').first().json.product_name,\n    email: $('Extract Script').first().json.email\n  }\n}];"
+      },
+      "id": "442a0d29-94fd-47e2-bbf8-49c9285caac1",
+      "name": "Extract Video ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "88873db8-453a-4a46-9320-35fcbac6b6b3",
+      "name": "Wait 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1560,
+        300
+      ],
+      "webhookId": "c3b96219-67be-4498-9e17-7ab3a0ce76f4"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.d-id.com/talks/{{ $json.video_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "76191f72-7354-4ec4-ba5d-f1ef7564c768",
+      "name": "Get Video URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "3",
+          "name": "D-ID API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst videoUrl = response.result_url || 'Processing...';\nconst status = response.status;\n\nreturn [{\n  json: {\n    status: status,\n    video_url: videoUrl,\n    product_name: $('Extract Video ID').first().json.product_name,\n    script: $('Extract Video ID').first().json.script,\n    message: status === 'done' ? 'Video ready!' : 'Still processing, check back in 1 minute'\n  }\n}];"
+      },
+      "id": "25cbe40a-04f1-4c7f-9456-c68c9cc98074",
+      "name": "Show Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Google Form Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Data": {
+      "main": [
+        [
+          {
+            "node": "Generate Script (Gemini FREE)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Script (Gemini FREE)": {
+      "main": [
+        [
+          {
+            "node": "Extract Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Script": {
+      "main": [
+        [
+          {
+            "node": "Create Video (D-ID)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Video (D-ID)": {
+      "main": [
+        [
+          {
+            "node": "Extract Video ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Video ID": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s": {
+      "main": [
+        [
+          {
+            "node": "Get Video URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Video URL": {
+      "main": [
+        [
+          {
+            "node": "Show Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "description": "Simple workflow: Google Form \u2192 Gemini (free) \u2192 D-ID video"
+  }
+}

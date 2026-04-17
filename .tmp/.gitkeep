@@ -1,0 +1,2 @@
+# This file keeps the .tmp directory in git
+# All other files in this directory are temporary and gitignored
