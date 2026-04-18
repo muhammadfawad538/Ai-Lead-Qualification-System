@@ -42,6 +42,13 @@ export default function LeadForm() {
       formBody.append('Phone', formData.phone)
       formBody.append('Message', formData.message)
 
+      // Debug: log what we're sending
+      console.log('Submitting form data:', {
+        fullName: formData.fullName,
+        email: formData.email,
+        company: formData.company
+      })
+
       const response = await fetch(formUrl, {
         method: 'POST',
         body: formBody,
