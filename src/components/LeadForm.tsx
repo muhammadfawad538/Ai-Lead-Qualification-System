@@ -32,8 +32,8 @@ export default function LeadForm() {
     setResult({ status: 'processing' })
 
     try {
-      // Submit directly to n8n form endpoint
-      const formUrl = 'https://pakfawad.app.n8n.cloud/form/ee6a5882-b7a0-4f8a-9f38-b86aec1ec9e3'
+      // Submit to n8n webhook endpoint
+      const webhookUrl = 'https://pakfawad.app.n8n.cloud/webhook/lead-submission'
 
       // Debug: log what we're sending
       console.log('Submitting form data:', {
@@ -42,7 +42,7 @@ export default function LeadForm() {
         company: formData.company
       })
 
-      const response = await fetch(formUrl, {
+      const response = await fetch(webhookUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
