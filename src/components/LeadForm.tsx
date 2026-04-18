@@ -35,13 +35,6 @@ export default function LeadForm() {
       // Submit directly to n8n form endpoint
       const formUrl = 'https://pakfawad.app.n8n.cloud/form/ee6a5882-b7a0-4f8a-9f38-b86aec1ec9e3'
 
-      const formBody = new FormData()
-      formBody.append('Full Name', formData.fullName)
-      formBody.append('Email', formData.email)
-      formBody.append('Company Name', formData.company)
-      formBody.append('Phone', formData.phone)
-      formBody.append('Message', formData.message)
-
       // Debug: log what we're sending
       console.log('Submitting form data:', {
         fullName: formData.fullName,
@@ -51,7 +44,16 @@ export default function LeadForm() {
 
       const response = await fetch(formUrl, {
         method: 'POST',
-        body: formBody,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          'Full Name': formData.fullName,
+          'Email': formData.email,
+          'Company Name': formData.company,
+          'Phone': formData.phone,
+          'Message': formData.message,
+        }),
       })
 
       if (response.ok) {
